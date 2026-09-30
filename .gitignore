@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+__pycache__/
+*.pyc
+.venv/
+data/
+*.las
+*.mb59
+*.xyz
+*.all
+.DS_Store
+.env
+.env.local

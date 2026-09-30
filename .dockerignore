@@ -1,0 +1,9 @@
+.git
+node_modules
+frontend/node_modules
+frontend/.next
+**/__pycache__
+data
+NOTES
+*.all
+*.las
