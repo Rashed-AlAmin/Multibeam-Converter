@@ -7,7 +7,7 @@ QGIS, CloudCompare or any standard point-cloud viewer.
 
 ```
  browser ──upload──▶ Next.js ──proxy──▶ FastAPI ──▶ mbinfo
-                                           │        mbkongsbergpreprocess
+                                           │        mbpreprocess
                                            │        mblist
                                            │        pyproj  (WGS84 → UTM)
                                            ▼        laspy   (LAS 1.4 + CRS)
@@ -28,9 +28,11 @@ docker compose up --build
 Then open **<http://localhost:3000>**, drop a `.all` file on the page, and
 download the LAS when it finishes.
 
-> **First build takes 30–45 minutes.** It compiles MB-System from source.
-> That cost is paid once; the layer is cached afterwards and rebuilds of the
-> application code take seconds.
+> **The first build compiles MB-System from source.** On a 2-core machine that
+> stage takes about 4–5 minutes, with the dependency install ahead of it taking
+> longer than the compile itself; budget roughly 15 minutes for a cold build of
+> both images. The cost is paid once — the layer ordering means rebuilds after
+> an application-code change take seconds.
 
 Verify the real toolchain is present at any time:
 
@@ -63,6 +65,12 @@ RUN git clone --depth 1 --branch "${MBSYSTEM_VERSION}" \
 ```
 
 ### Problems solved
+
+**`mbkongsbergpreprocess` no longer exists.** The brief's pipeline calls for it,
+but MB-System 5.8.2 does not ship it — the first end-to-end run failed with
+`FileNotFoundError`. It has been replaced by the format-generic `mbpreprocess`
+(`--input=` / `--format=` instead of `-I`). The code now tries `mbpreprocess`
+first and falls back to the legacy name, so either generation works.
 
 **Ubuntu 24.04, not 26.04.** My development machine runs Ubuntu 26.04, but the
 image targets 24.04 LTS. MB-System's dependency chain (GMT, GDAL, PROJ, netCDF)
@@ -122,16 +130,22 @@ Confirms the file is readable sonar data and reports its MBIO format ID
 or mislabelled upload is rejected in seconds instead of failing twenty minutes
 into a conversion.
 
-### Step 2 — `mbkongsbergpreprocess -I input.all`
+### Step 2 — `mbpreprocess --input=input.all --format=58`
 
 Converts the raw file into MB-System's working format (`.mb59`), merging the
 navigation and attitude records with the soundings. This is the step that makes
 the output *correct* rather than merely *produced* — without it, each sounding
 carries a cruder position.
 
-The output filename is located by globbing for `*.mb59` rather than by assuming
-a naming convention, so the code does not break if a future MB-System version
-names its output differently.
+The brief names `mbkongsbergpreprocess` for this step. **That program does not
+exist in MB-System 5.8.2** — it was superseded by the format-generic
+`mbpreprocess`, which takes long options rather than `-I`. The code prefers
+`mbpreprocess` and falls back to `mbkongsbergpreprocess` if only the older tool
+is present, so the pipeline works against either generation of MB-System.
+
+The output filename is located by globbing for `*.mb59`, because the tool also
+drops sidecar files (`.fbt`, `.fnv`, `.inf`) beside it and derives all those
+names itself.
 
 ### Step 3 — `mblist -I input.mb59 -MA -OXYZ`
 
@@ -140,8 +154,9 @@ Exports every sounding as longitude, latitude and depth.
 - **`-MA`** emits *all* beams. A ping fans out across a swath of hundreds of
   beams; without this flag only the centre beam survives and the vast majority
   of the survey is discarded.
-- **`-OXYZ`** emits longitude, latitude and depth. **Capital `Z` is depth,
-  positive down.**
+- **`-OXYZ`** emits longitude, latitude and **topography**. See the sign note
+  below — this is the one place where the brief's description is inverted
+  relative to MB-System itself.
 
 `mblist`'s stdout is redirected **straight to a file**. For a 29 MB input this
 text is ~150 MB; buffering it through a Python string would be a needless spike
@@ -183,16 +198,40 @@ with `pyproj`; adding PDAL would mean marshalling millions of points through a
 second subprocess and a JSON pipeline definition for no gain. Both are permitted
 by the brief.
 
-### The Z convention — stated explicitly
+### The Z convention — verified, not assumed
 
-> **LAS `Z` is ELEVATION in metres, positive up.** A sounding 42.3 m beneath the
-> surface is written as `-42.3`.
+> **LAS `Z` is ELEVATION in metres, positive up.** A sounding 11.3 m beneath the
+> surface is written as `-11.3`.
 
-MB-System reports depth positive *down*; the sign is flipped **exactly once**,
-in `reproject()`, and nowhere else. This matches what QGIS, CloudCompare and
-PDAL expect — without it the sea bed renders above the water surface. The
-convention is repeated in the UI after every conversion so the user is never
-guessing.
+The brief states that `-OXYZ` gives *"depth (positive down)"* and that lowercase
+`z` gives elevation. **That is the wrong way round.** The `mblist(1)` man page
+shipped with MB-System says:
+
+```
+Z  for topography (positive upwards) (m)
+z  for depth (positive downwards) (m)
+```
+
+and running both against the sample file confirms it:
+
+```
+mblist ... -OXYZ  ->  89.5816280249   25.0637342985   -11.3155
+mblist ... -OXYz  ->  89.5816280249   25.0637342985    11.3155
+```
+
+So capital `Z` is **already** elevation positive up — the convention LAS and
+every GIS viewer expect. **This pipeline therefore applies no sign flip at
+all.** My first implementation negated it on the strength of the brief's
+wording, which put the sea bed 11 m into the air; reading the man page and
+testing the actual binary is what caught it.
+
+No automatic sign detection is applied either. A "flip it if the values look
+positive" heuristic would corrupt legitimately positive data — an inland survey
+referenced to the ellipsoid can sit above zero — so the documented convention
+is followed and stated, rather than guessed at.
+
+The depth figures in the UI and in `Summary` are the same values expressed
+positive-down, because that is how surveyors talk about them.
 
 ---
 

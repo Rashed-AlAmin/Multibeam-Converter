@@ -83,26 +83,57 @@ drag an average halfway to Africa. The median shrugs them off.
 
 Two words that sound the same and mean opposite things:
 
-| Word | Direction | Sea floor 42 m down is... |
+| Word | Direction | Sea floor 11.3 m down is... |
 |---|---|---|
-| **Depth** | positive **down** | `+42` |
-| **Elevation** | positive **up** | `-42` |
+| **Depth** | positive **down** | `+11.3` |
+| **Elevation** (topography) | positive **up** | `-11.3` |
 
-- `mblist -OXYZ` gives you **depth** (+42).
-- LAS files and every GIS viewer expect **elevation** (-42).
+LAS files and every GIS viewer expect **elevation**. If you feed them depth,
+your sea bed renders **11 metres in the air** and the survey is upside down.
 
-If you don't flip it, your sea bed appears **42 metres in the air** and the
-whole survey is upside down.
+### Now the part that actually bit us
 
-We flip it **once**, in `reproject()` in `pipeline.py`:
+The assignment brief says:
 
-```python
-elevation = -points[:, 2]   # depth (down) -> elevation (up)
+> `-OXYZ` outputs longitude, latitude and depth... Z gives depth (positive
+> down); lowercase z gives elevation.
+
+**That is backwards.** The `mblist` man page that ships with MB-System says:
+
+```
+Z  for topography (positive upwards) (m)
+z  for depth (positive downwards) (m)
 ```
 
-One place, one line, commented. Then it's stated in the README and shown in the
-UI. The brief asks you to "clearly document how Z is represented" — this is
-that.
+We ran both against the real file. The man page was right:
+
+```
+mblist ... -OXYZ  ->  ...  -11.3155     <- elevation, already correct for LAS
+mblist ... -OXYz  ->  ...   11.3155     <- depth
+```
+
+So the correct code is **no flip at all**:
+
+```python
+elevation = points[:, 2]   # capital Z is already positive-up topography
+```
+
+The first version of this pipeline negated it, on the strength of the brief's
+wording. The result passed every test that only checked *shapes and counts* —
+526,038 points, right zone, right CRS — and was still completely wrong, with
+the entire river bed floating in the sky.
+
+**The lesson, and it's the big one:** a sign convention is not something you
+read about, it's something you *measure*. Two commands and four numbers settled
+what a paragraph of prose got wrong. When a document and a binary disagree,
+the binary wins.
+
+### Why we don't "auto-detect" the sign
+
+Tempting: *"if the numbers look positive, flip them."* Don't. A survey inland,
+referenced to the ellipsoid, can legitimately sit **above** zero — the
+heuristic would silently corrupt it. Follow the documented convention, state it
+in the README, and show it in the UI.
 
 ---
 

@@ -28,7 +28,7 @@ out — in 2 seconds, not 20 minutes in. That's free robustness.
 
 ---
 
-## Room 2 — `mbkongsbergpreprocess -I input.all`
+## Room 2 — `mbpreprocess --input=input.all --format=58`
 
 **Metaphor: the sonar's handwriting is messy. This rewrites it in neat print.**
 
@@ -39,6 +39,11 @@ own working format, `.mb59`.
 
 **Why bother?** Because without it, the position attached to each sounding is
 sloppier. This is the step that makes the output *correct*, not just *produced*.
+
+**Gotcha we hit:** the brief says to use `mbkongsbergpreprocess`. That program
+**doesn't exist any more** in MB-System 5.8.2 — it was replaced by the generic
+`mbpreprocess`. Our first real run blew up on exactly this. Lesson: the docs
+you're handed can be older than the software you install.
 
 ---
 
@@ -60,9 +65,19 @@ Output is boring text, one dot per line:
 -2.9481190   58.6620110    42.885
 ```
 
-**⚠️ The trap:** capital `Z` means **depth, positive DOWN** (42.3 = 42.3 metres
-*below* the surface). Lowercase `z` would mean elevation, positive up. Get this
-backwards and your sea floor points at the sky.
+**⚠️ The trap — and the brief gets it backwards.** The man page says:
+
+```
+Z  for topography (positive upwards)
+z  for depth (positive downwards)
+```
+
+So capital `Z` gives you **-11.3** (elevation, already what LAS wants) — *not*
+depth. The brief claims the opposite. We tested both flags on the real file and
+the man page won. Get this backwards and your sea floor points at the sky.
+
+**The lesson is the real one:** when a sign convention matters, don't trust the
+prose — run both and look at the numbers.
 
 ---
 
@@ -79,9 +94,10 @@ See `03-utm-and-crs.md`. Short version: degrees → metres.
 `laspy` writes a LAS 1.4 file: a header (what's inside, what projection, the
 bounding box) followed by millions of tightly packed points.
 
-We flip the sign here — **once, in exactly one place** — so LAS Z is elevation
-(positive up), which is what GIS software expects. It's written down in the
-README and shown in the UI, because the brief asks you to document it.
+**No sign flip happens here.** Capital `Z` from `mblist` is already elevation
+positive up, which is exactly what GIS software expects, so the values pass
+straight through. The convention is written down in the README and shown in the
+UI after every conversion, because the brief asks you to document it.
 
 ---
 

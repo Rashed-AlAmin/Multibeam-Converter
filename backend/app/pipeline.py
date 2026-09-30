@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from itertools import islice
@@ -67,8 +68,10 @@ class Summary:
     mbinfo_format: str = ""
     las_bytes: int = 0
     z_convention: str = (
-        "LAS Z is ELEVATION in metres, positive up (sea bed below the ellipsoid "
-        "is negative). MB-System reports depth positive down; it is negated here."
+        "LAS Z is ELEVATION in metres, positive up: a sounding 11.3 m below the "
+        "surface is written as -11.3. mblist -OXYZ already emits topography "
+        "positive up, so no sign flip is applied. The depth figures above are "
+        "the same values expressed positive-down."
     )
 
     def as_dict(self) -> dict:
@@ -144,25 +147,41 @@ def inspect(all_file: Path, work: Path) -> str:
 # --------------------------------------------------------------------------
 # stage 2 - preprocess
 # --------------------------------------------------------------------------
-def preprocess(all_file: Path, work: Path) -> Path:
+# MB-System 5.8 replaced the format-specific mbkongsbergpreprocess with the
+# generic mbpreprocess, which takes long options instead of -I. Both are
+# accepted so the image still works if it is ever pinned to an older release.
+PREPROCESS_TOOLS = ("mbpreprocess", "mbkongsbergpreprocess")
+
+
+def preprocess(all_file: Path, work: Path, mb_format: str = "") -> Path:
     """Convert the raw .all into MB-System's .mb59 working format.
 
-    mbkongsbergpreprocess derives its own output filename, so the result is
-    located by globbing rather than by assuming a naming convention.
+    The tool derives its own output filename and also drops sidecar files
+    (.fbt, .fnv, .inf) beside it, so the result is located by globbing for
+    *.mb59 rather than by assuming a naming convention.
     """
+    tool = next((t for t in PREPROCESS_TOOLS if shutil.which(t)), None)
+    if tool is None:
+        raise ConversionError(
+            "No MB-System preprocessing tool is installed in this image."
+        )
+
+    if tool == "mbpreprocess":
+        cmd = [tool, f"--input={all_file.name}"]
+        if mb_format:
+            cmd.append(f"--format={mb_format}")
+    else:
+        cmd = [tool, "-I", all_file.name]
+
     before = {p.name for p in work.glob("*.mb59")}
-    _run(
-        ["mbkongsbergpreprocess", "-I", all_file.name],
-        cwd=work,
-        timeout=TIMEOUT_PREPROCESS,
-    )
+    _run(cmd, cwd=work, timeout=TIMEOUT_PREPROCESS)
     produced = sorted(p for p in work.glob("*.mb59") if p.name not in before)
     if not produced:
         # Some builds overwrite in place rather than creating a new file.
         produced = sorted(work.glob("*.mb59"))
     if not produced:
         raise ConversionError(
-            "mbkongsbergpreprocess produced no .mb59 output for this file."
+            f"{tool} produced no .mb59 output for this file."
         )
     return produced[0]
 
@@ -171,10 +190,19 @@ def preprocess(all_file: Path, work: Path) -> Path:
 # stage 3 - export soundings
 # --------------------------------------------------------------------------
 def export_soundings(mb59: Path, work: Path) -> Path:
-    """Write every beam as longitude / latitude / depth text.
+    """Write every beam as longitude / latitude / topography text.
 
-    -MA  every beam in the swath, not just the centre beam
-    -OXYZ  longitude, latitude, depth (capital Z: positive DOWN)
+    -MA    every beam in the swath, not just the centre beam
+    -OXYZ  longitude, latitude, topography
+
+    On the sign of Z, the mblist(1) man page is explicit and was confirmed
+    against the sample file before relying on it:
+
+        Z  for topography (positive upwards) (m)
+        z  for depth (positive downwards) (m)
+
+    So capital Z is ALREADY elevation, positive up - the convention LAS
+    wants. No sign flip is applied anywhere in this pipeline.
     """
     xyz = work / "soundings.xyz"
     _run(
@@ -255,9 +283,10 @@ def reproject(points: np.ndarray) -> tuple[np.ndarray, CRS, int, str]:
     transformer = Transformer.from_crs(CRS.from_epsg(4326), crs, always_xy=True)
     easting, northing = transformer.transform(points[:, 0], points[:, 1])
 
-    # Capital-Z from mblist is depth, positive down. LAS consumers expect
-    # elevation, positive up, so the sign is flipped exactly once, here.
-    elevation = -points[:, 2]
+    # Capital-Z from mblist is topography, positive up (see the man-page
+    # quotation in export_soundings), which is already what LAS consumers
+    # expect. Passing it through unchanged is deliberate: no sign flip.
+    elevation = points[:, 2]
 
     out = np.column_stack([easting, northing, elevation])
     finite = np.isfinite(out).all(axis=1)
@@ -338,7 +367,7 @@ def convert(
     summary.mbinfo_format = inspect(all_file, work)
 
     progress(0.20, "Preprocessing to MB-System format")
-    mb59 = preprocess(all_file, work)
+    mb59 = preprocess(all_file, work, summary.mbinfo_format)
 
     progress(0.45, "Exporting soundings")
     xyz = export_soundings(mb59, work)
@@ -348,7 +377,10 @@ def convert(
     summary.point_count = int(geographic.shape[0])
     summary.lon_min, summary.lon_max = map(float, (geographic[:, 0].min(), geographic[:, 0].max()))
     summary.lat_min, summary.lat_max = map(float, (geographic[:, 1].min(), geographic[:, 1].max()))
-    summary.depth_min_m, summary.depth_max_m = map(float, (geographic[:, 2].min(), geographic[:, 2].max()))
+    # Column 2 is topography (positive up); depth is its negation, and is
+    # reported positive-down because that is how surveyors talk about it.
+    summary.depth_min_m = float(-geographic[:, 2].max())
+    summary.depth_max_m = float(-geographic[:, 2].min())
 
     progress(0.78, "Reprojecting to UTM")
     utm_points, crs, zone, hemi = reproject(geographic)
