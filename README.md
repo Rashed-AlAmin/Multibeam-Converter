@@ -32,7 +32,8 @@ download the LAS when it finishes.
 > stage takes about 4–5 minutes, with the dependency install ahead of it taking
 > longer than the compile itself; budget roughly 15 minutes for a cold build of
 > both images. The cost is paid once — the layer ordering means rebuilds after
-> an application-code change take seconds.
+> an application-code change take seconds — measured at 2.8 s for a backend
+> rebuild after editing `pipeline.py`.
 
 Verify the real toolchain is present at any time:
 
@@ -42,6 +43,43 @@ docker compose exec backend mbinfo -V
 ```
 
 Shut down with `docker compose down` (add `-v` to also drop the job volume).
+
+### Verifying it works
+
+```bash
+./scripts/smoke-test.sh /path/to/0014_20240913_042229_ShipName.all
+```
+
+Uploads over HTTP exactly as the browser does, polls to completion, downloads
+the LAS, re-reads it to confirm the point count and CRS, then checks that junk
+input, a wrong extension and an unknown job id are all handled. Output against
+the supplied sample file:
+
+```
+  points        526,038
+  depth         0.28 to 16.51 m (positive down)
+  UTM zone      45N  EPSG:32645  WGS 84 / UTM zone 45N
+  LAS size      14,729,600 bytes
+
+  point count   526,038
+  version       1.4  point format 1
+  CRS           WGS 84 / UTM zone 45N -> EPSG:32645
+  X metres      760430.441 .. 760500.448
+  Y metres      2774467.125 .. 2774552.760
+  Z metres      -16.505 .. -0.277
+
+  junk .all accepted for processing: HTTP 202
+  status:  error
+  message: This file contains no sonar records. It is not a valid Kongsberg
+           .all file, or it was truncated before any data was written.
+  wrong extension rejected: HTTP 400
+  unknown job id:            HTTP 404
+```
+
+**526,038 is exactly the "Number of Good Beams" figure `mbinfo` reports for
+that file**, so no soundings are lost or duplicated in the pipeline. Every Z is
+negative, confirming the whole cloud sits below the surface. End-to-end time is
+about 5 seconds.
 
 ---
 
@@ -95,6 +133,15 @@ navigation. `-DbuildTests=OFF` skips the unit-test targets. The result is a
 meaningfully smaller image and a faster, less fragile build — and nothing the
 conversion pipeline uses is lost. This is a headless server; it has no display
 to draw on.
+
+**Validating input properly.** `mbinfo` guesses a format from the `.all`
+extension and **exits 0 even on a file containing no sonar data at all** — it
+simply reports `Number of Records: 0`. A zero exit status is therefore not
+proof of a usable file. The first version of the gate trusted the exit code,
+and junk input got as far as the preprocessing stage before failing with the
+unhelpful message "mbpreprocess produced no .mb59 output". `inspect()` now
+parses the record and good-beam counts out of the mbinfo report and rejects an
+unusable file in well under a second, with a sentence a surveyor can act on.
 
 **A pinned tag, not `master`.** Upstream's most recent tags are `5.8.3beta*`.
 Pinning `MB-System-5.8.2` — the latest non-beta release — means the image is
@@ -337,6 +384,9 @@ backend hostname compiled into the client bundle.
 ```
 .
 ├── docker-compose.yml      # one command brings both services up
+├── scripts/
+│   ├── smoke-test.sh       # full HTTP round trip against a running stack
+│   └── verify_las.py       # independent re-read of a written LAS
 ├── backend/
 │   ├── Dockerfile          # MB-System from source + FastAPI
 │   ├── requirements.txt

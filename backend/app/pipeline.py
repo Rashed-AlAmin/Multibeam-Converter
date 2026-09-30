@@ -125,23 +125,45 @@ def _run(cmd: list[str], *, cwd: Path, timeout: int, stdout_path: Path | None = 
 # stage 1 - inspect
 # --------------------------------------------------------------------------
 _FORMAT_RE = re.compile(r"MBIO Data Format ID:\s*(\d+)")
+_RECORDS_RE = re.compile(r"Number of Records:\s*(\d+)")
+_GOOD_BEAMS_RE = re.compile(r"Number of Good Beams:\s*(\d+)")
 
 
 def inspect(all_file: Path, work: Path) -> str:
     """Run mbinfo and return the detected format ID.
 
-    A file that mbinfo cannot parse is rejected here, before any expensive
-    work happens, so the user gets a fast, clear failure.
+    This is the gate. mbinfo guesses a format from the .all extension and
+    exits 0 even on a file that holds no sonar data at all - it simply
+    reports zero records. So a zero-exit is not proof of a usable file, and
+    the record and beam counts have to be read and checked. Catching it here
+    means a bad upload fails in seconds with a sentence the user can act on,
+    rather than surfacing later as a confusing message about a missing .mb59.
     """
     text = _run(["mbinfo", "-I", all_file.name], cwd=work, timeout=TIMEOUT_INSPECT)
-    match = _FORMAT_RE.search(text)
-    fmt = match.group(1) if match else ""
-    if "Number of Records" not in text and not fmt:
+
+    fmt_match = _FORMAT_RE.search(text)
+    records_match = _RECORDS_RE.search(text)
+
+    if not fmt_match or not records_match:
         raise ConversionError(
-            "mbinfo could not read this file as Kongsberg sonar data. "
-            "It may be corrupt, truncated, or not a .all file."
+            "mbinfo could not read this file as multibeam sonar data. "
+            "It may be corrupt, truncated, or not a Kongsberg .all file."
         )
-    return fmt
+
+    if int(records_match.group(1)) == 0:
+        raise ConversionError(
+            "This file contains no sonar records. It is not a valid Kongsberg "
+            ".all file, or it was truncated before any data was written."
+        )
+
+    good = _GOOD_BEAMS_RE.search(text)
+    if good and int(good.group(1)) == 0:
+        raise ConversionError(
+            "This file contains sonar records but no usable depth soundings, "
+            "so there is nothing to convert."
+        )
+
+    return fmt_match.group(1)
 
 
 # --------------------------------------------------------------------------
@@ -331,7 +353,7 @@ def write_preview(utm_points: np.ndarray, out_path: Path) -> None:
     import json
 
     count = len(utm_points)
-    stride = max(1, count // PREVIEW_MAX_POINTS)
+    stride = max(1, math.ceil(count / PREVIEW_MAX_POINTS))
     sample = utm_points[::stride]
 
     origin = utm_points.min(axis=0)
