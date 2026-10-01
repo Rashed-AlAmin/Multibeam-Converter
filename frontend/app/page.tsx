@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  API,
   Job,
   Preview,
   STAGES,
+  resolveApiBase,
   depthColor,
   formatBytes,
   formatCount,
@@ -22,6 +22,19 @@ export default function Page() {
   const [fault, setFault] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [api, setApi] = useState<string | null>(null);
+
+  // Resolved once on mount. Until it arrives the convert button stays
+  // disabled, so an upload can never be sent to the wrong place.
+  useEffect(() => {
+    let alive = true;
+    void resolveApiBase().then((base) => {
+      if (alive) setApi(base);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -50,7 +63,7 @@ export default function Page() {
 
   // ---- upload ------------------------------------------------------------
   function start() {
-    if (!file) return;
+    if (!file || api === null) return;
     setUploading(true);
     setUploadPct(0);
     setFault(null);
@@ -62,7 +75,7 @@ export default function Page() {
     // file can be large enough that the user needs to see it moving.
     const xhr = new XMLHttpRequest();
     xhrRef.current = xhr;
-    xhr.open("POST", `${API}/api/jobs`);
+    xhr.open("POST", `${api ?? ""}/api/jobs`);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) setUploadPct(e.loaded / e.total);
     };
@@ -95,14 +108,14 @@ export default function Page() {
 
   function cancel() {
     xhrRef.current?.abort();
-    if (job) void fetch(`${API}/api/jobs/${job.id}`, { method: "DELETE" });
+    if (job) void fetch(`${api ?? ""}/api/jobs/${job.id}`, { method: "DELETE" });
     setJob(null);
     setUploadPct(0);
     setUploading(false);
   }
 
   function reset() {
-    if (job) void fetch(`${API}/api/jobs/${job.id}`, { method: "DELETE" });
+    if (job) void fetch(`${api ?? ""}/api/jobs/${job.id}`, { method: "DELETE" });
     setFile(null);
     setJob(null);
     setPreview(null);
@@ -116,7 +129,7 @@ export default function Page() {
     let alive = true;
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(`${API}/api/jobs/${job.id}`);
+        const res = await fetch(`${api ?? ""}/api/jobs/${job.id}`);
         if (!res.ok) throw new Error(`status ${res.status}`);
         const next = (await res.json()) as Job;
         if (alive) setJob(next);
@@ -128,7 +141,7 @@ export default function Page() {
       alive = false;
       clearInterval(timer);
     };
-  }, [job]);
+  }, [job, api]);
 
   // ---- preview -----------------------------------------------------------
   useEffect(() => {
@@ -136,7 +149,7 @@ export default function Page() {
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch(`${API}/api/jobs/${job.id}/preview`);
+        const res = await fetch(`${api ?? ""}/api/jobs/${job.id}/preview`);
         if (!res.ok) return;
         const data = (await res.json()) as Preview;
         if (alive) setPreview(data);
@@ -147,7 +160,7 @@ export default function Page() {
     return () => {
       alive = false;
     };
-  }, [job?.status, job?.id]);
+  }, [job?.status, job?.id, api]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -223,8 +236,8 @@ export default function Page() {
                 <button className="btn-ghost" onClick={reset}>
                   Choose another
                 </button>
-                <button className="btn-primary" onClick={start}>
-                  Convert to LAS
+                <button className="btn-primary" onClick={start} disabled={api === null}>
+                  {api === null ? "Connecting…" : "Convert to LAS"}
                 </button>
               </div>
             </div>
@@ -296,7 +309,7 @@ export default function Page() {
             </div>
 
             <div className="actions" style={{ marginBottom: 22 }}>
-              <a href={`${API}/api/jobs/${job.id}/download`} download={job.download_name}>
+              <a href={`${api ?? ""}/api/jobs/${job.id}/download`} download={job.download_name}>
                 <button className="btn-primary">
                   Download {job.download_name} ({formatBytes(s.las_bytes)})
                 </button>

@@ -1,7 +1,33 @@
 // Small shared helpers. Kept out of the component so the page file stays
 // about the interface rather than about number formatting.
 
-export const API = process.env.NEXT_PUBLIC_API_BASE ?? "";
+/**
+ * Where the browser sends API traffic.
+ *
+ * Two routes exist, and the difference matters for large files:
+ *
+ *  - ""                     same origin, proxied by Next. Simple, no CORS,
+ *                           but Next BUFFERS a proxied request body in
+ *                           memory, so a multi-gigabyte upload would exhaust
+ *                           the Node process.
+ *  - "http://host:8000"     straight to the backend, which streams the
+ *                           upload to disk in 1 MB chunks and never holds
+ *                           the file in memory.
+ *
+ * The value is fetched at runtime rather than inlined at build time, so one
+ * image can be deployed anywhere. If the lookup fails we fall back to the
+ * proxy, which always works even if it is less efficient.
+ */
+export async function resolveApiBase(): Promise<string> {
+  try {
+    const res = await fetch("/config", { cache: "no-store" });
+    if (!res.ok) return "";
+    const { apiBase } = (await res.json()) as { apiBase?: string };
+    return apiBase ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export type Summary = {
   point_count: number;

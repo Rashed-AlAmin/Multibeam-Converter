@@ -42,7 +42,17 @@ services:
       dockerfile: frontend/Dockerfile
     image: multibeam-converter-frontend
     environment:
+      # Used by the Next server to proxy small JSON calls to the backend.
       BACKEND_URL: http://backend:8000
+      # Handed to the BROWSER at runtime so bulk traffic (upload, download)
+      # goes straight to the backend, which streams it to disk. Next buffers
+      # a proxied body in memory, so routing a multi-gigabyte upload through
+      # the proxy would exhaust the Node process.
+      #
+      # This must be reachable FROM THE BROWSER. Change the host if you are
+      # not running on the same machine; unset it to fall back to the proxy.
+      PUBLIC_API_BASE: http://localhost:8000
+      MAX_UPLOAD_BYTES: "2147483648"   # 2 GiB
     ports:
       - "3000:3000"
     depends_on:
