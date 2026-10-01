@@ -34,7 +34,9 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(900px 420px at 50% -120px, var(--accent-soft), transparent),
+    var(--bg);
   color: var(--text);
   font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -42,7 +44,8 @@ body {
 
 .wrap { max-width: 860px; margin: 0 auto; padding: 48px 20px 80px; }
 
-header h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
+header { text-align: center; }
+header h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.02em; }
 header p { margin: 0 0 32px; color: var(--muted); }
 
 .panel {
@@ -55,15 +58,21 @@ header p { margin: 0 0 32px; color: var(--muted); }
 
 /* ---- drop zone ---- */
 .drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   border: 2px dashed var(--border);
   border-radius: 12px;
-  padding: 44px 24px;
+  padding: 48px 24px;
   text-align: center;
   cursor: pointer;
-  transition: border-color .15s, background .15s;
+  transition: border-color .15s, background .15s, transform .15s;
   background: var(--panel);
 }
+.drop:hover { transform: translateY(-1px); }
 .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-icon { color: var(--muted); margin-bottom: 12px; transition: color .15s; }
+.drop:hover .drop-icon, .drop.over .drop-icon { color: var(--accent); }
 .drop strong { display: block; font-size: 16px; margin-bottom: 4px; }
 .drop span { color: var(--muted); font-size: 13px; }
 .drop input { display: none; }

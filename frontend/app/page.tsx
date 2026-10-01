@@ -214,13 +214,22 @@ export default function Page() {
               choose(e.dataTransfer.files?.[0] ?? null);
             }}
           >
+            <svg className="drop-icon" width="40" height="40" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 16V4m0 0L7 9m5-5l5 5M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
             <strong>Drop a .all file here, or click to browse</strong>
             <span>Kongsberg multibeam raw data</span>
-            <input
-              type="file"
-              accept=".all"
-              onChange={(e) => choose(e.target.files?.[0] ?? null)}
-            />
+            {/* No `accept` filter: some OS file pickers hide every other
+                extension when one is set, which blocks picking a wrong-type
+                file on purpose to see the app's own error message. The
+                friendly validation below in choose() covers it instead. */}
+            <input type="file" onChange={(e) => choose(e.target.files?.[0] ?? null)} />
           </label>
         )}
 
